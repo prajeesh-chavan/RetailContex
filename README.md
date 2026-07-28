@@ -47,7 +47,6 @@ Enterprise medallion pipeline for retail analytics — streaming CDC ingestion, 
 | **Data Quality**            | dbt test — 264 automated checks                 |
 | **Orchestration**           | Dagster (daily schedule)                        |
 | **CI/CD**                   | GitHub Actions (ruff → pytest → dbt)            |
-| **Containerization**        | Docker                                          |
 | **Data Catalog**            | dbt docs (GitHub Pages)                         |
 
 ## Key Features
@@ -93,9 +92,6 @@ python run_pipeline.py --entities customer --bronze-timeout 120
 
 # 3. Run all entities in parallel
 python run_pipeline.py --parallel 4 --bronze-timeout 120
-
-# 4. Run with Docker
-docker compose run --rm pipeline --entities customer --bronze-timeout 120
 ```
 
 ## Project Structure
