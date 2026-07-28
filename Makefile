@@ -33,6 +33,18 @@ dbt-run:
 dbt-test:
 	cd dbt_retail && dbt test
 
+dbt-docs-generate:
+	cd dbt_retail && dbt docs generate
+
+dbt-docs-serve:
+	cd dbt_retail && dbt docs serve --port 8080
+
+dagster-dev:
+	cd dagster && ..\env\Scripts\dagster dev -f definitions.py
+
+dagster-run-all:
+	..\env\Scripts\dagster asset materialize --select "*" -f dagster\definitions.py
+
 setup:
 	pip install -r requirements.txt
 
