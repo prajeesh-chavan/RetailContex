@@ -6,6 +6,11 @@ on:
   push:
     branches: [develop]
 
+permissions:
+  contents: read
+  id-token: write
+  pages: write
+
 env:
   PYTHON_VERSION: "3.10"
 
@@ -37,7 +42,7 @@ jobs:
 
   dbt:
     runs-on: ubuntu-latest
-    needs: lint
+    needs: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -69,3 +74,41 @@ jobs:
         run: dbt run --project-dir dbt_retail
       - name: dbt test
         run: dbt test --project-dir dbt_retail
+
+  docs:
+    runs-on: ubuntu-latest
+    needs: dbt
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install dbt
+        run: pip install dbt-core dbt-snowflake
+      - name: Generate profiles.yml
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          dbt_retail:
+            outputs:
+              dev:
+                type: snowflake
+                account: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+                database: ${{ secrets.SNOWFLAKE_DATABASE }}
+                warehouse: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
+                schema: ${{ secrets.SNOWFLAKE_SCHEMA }}
+                user: ${{ secrets.SNOWFLAKE_USER }}
+                password: ${{ secrets.SNOWFLAKE_PASSWORD }}
+                role: ${{ secrets.SNOWFLAKE_ROLE }}
+                threads: 1
+            target: dev
+          EOF
+      - name: Generate dbt docs
+        run: dbt docs generate --project-dir dbt_retail
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dbt_retail/target
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

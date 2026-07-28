@@ -33,6 +33,12 @@ dbt-run:
 dbt-test:
 	cd dbt_retail && dbt test
 
+dbt-docs-generate:
+	cd dbt_retail && dbt docs generate
+
+dbt-docs-serve:
+	cd dbt_retail && dbt docs serve --port 8080
+
 setup:
 	pip install -r requirements.txt
 
