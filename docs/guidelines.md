@@ -54,3 +54,27 @@ Minimal boilerplate: schemas + transform function ~60 lines per entity.
 
 - Bronze → Silver → dbt run → dbt test (must run in sequence)
 - Delete checkpoint dirs after schema column renames (checkpoint stores column metadata)
+
+## Versioning
+
+Tags are annotated (`git tag -a`) with a description of what was delivered.
+
+| Tag | Trigger | What It Signifies |
+|-----|---------|-------------------|
+| `v0.1.0` | Phase 4 merged | All 30 entities — bronze → silver → gold operational |
+| `v0.2.0` | CI/CD + tests merged | ruff lint, pytest (152), dbt run/test on every PR |
+| `v0.3.0` | Docker + Dagster + dbt-docs merged | Containerized, scheduled, data catalog live |
+| `v1.0.0` | Monitoring + secrets + rollback | Production-hardened — survive real outages |
+
+### Future roadmap
+
+| Tag | Milestone | Scope |
+|-----|-----------|-------|
+| `v2.0.0` | Feature store | Point-in-time features from gold layer |
+| `v2.1.0` | Training pipeline | Auto feature engineering + experiment tracking |
+| `v2.2.0` | Model registry | Register, version, batch inference |
+| `v2.3.0` | Feature serving | Real-time feature lookup for online inference |
+| `v3.0.0` | Anomaly detection | Streaming outlier detection on bronze |
+| `v3.1.0` | Recommendations | Product/cross-sell engine |
+| `v3.2.0` | Forecasting | Demand, inventory, revenue prediction |
+| `v3.3.0` | Real-time decisions | Inference API + A/B testing |
