@@ -1,20 +1,23 @@
 # RetailCortex Project Context & Architecture Map
 
-This document serves as the high-level technical map and single source of truth for the **RetailCortex** project context. It outlines the architecture, data flows, current implementations, schema definitions, and major architectural vulnerabilities to avoid re-reading all source files repeatedly.
+This document serves as the high-level technical map for the **RetailCortex** project. It outlines the architecture, data flows, implementation status, and known vulnerabilities.
 
 ---
 
 ## 1. Project High-Level Architecture
-RetailCortex is a retail intelligence platform that processes e-commerce customer data using a **Medallion Architecture** (Bronze → Silver → Gold):
-*   **Ingestion (Source to Bronze):** A PySpark Structured Streaming job consumes customer events from Kafka and writes them to local Parquet files (Bronze layer) partitioned by `ingest_date`.
-*   **Transformation (Bronze to Silver):** A PySpark streaming job processes the Bronze Parquet stream, applies basic transformations (cleansing, string-to-timestamp parsing, string lower/upper casing), and appends it to a **Snowflake** table (`customers`) in the `SILVER` schema via a Spark micro-batch writer (`foreachBatch`).
-*   **Modeling & Analytics (Silver to Gold):** A **dbt** project compiles SQL transformations to incrementally build dimensional tables (`dim_customers` and `dim_dates`) in the Snowflake `GOLD` schema.
+RetailCortex is a retail intelligence platform that processes e-commerce data using a **Medallion Architecture** (Bronze → Silver → Gold) across 30 entities:
+
+*   **Ingestion (Bronze):** PySpark Structured Streaming consumes CDC events from 30 Kafka topics, validates JSON against typed schemas, and writes raw payloads as date-partitioned Parquet. Parse failures route to a dead letter queue (DLQ).
+*   **Transformation (Silver):** PySpark batch processing (`availableNow` trigger) reads Bronze Parquet, applies cleansing, type casting, and enrichment, then upserts into Snowflake `SILVER` schema tables via merge key. Transform failures route to a Silver DLQ.
+*   **Modeling (Gold):** dbt compiles SQL transformations to build 24 dimensional models (9 dims + 8 facts + 7 analytics) in Snowflake `GOLD` schema. Incremental merge strategy for most models, full refresh for analytics aggregations.
 
 ```mermaid
 graph TD
-    Kafka[Kafka Topic: telemetry.ecommerce.customers] -->|Spark Structured Streaming| Bronze[Bronze Layer: Local Parquet files Partitioned by ingest_date]
-    Bronze -->|Spark foreachBatch Streaming| Silver[Silver Layer: Snowflake Table 'customers']
-    Silver -->|dbt incremental run| Gold[Gold Layer: Snowflake Table 'dim_customers']
+    Kafka[30 Kafka CDC Topics] -->|PySpark Structured Streaming| Bronze[Bronze Layer: Parquet + DLQ]
+    Bronze -->|PySpark availableNow Batch| Silver[Silver Layer: Snowflake SILVER.*]
+    Silver -->|dbt incremental run| Gold[Gold Layer: Snowflake GOLD.*]
+    Gold -->|dbt test| Quality[264 dbt tests]
+    Bronze -->|Dagster Schedule| Orchestration[Dagster / Daily 6 AM]
 ```
 
 ---
@@ -22,39 +25,56 @@ graph TD
 ## 2. Directory & Artifact Map
 
 ```
-c:\Project\RetailContex\
-├── README.md                           # Basic project description
-├── cmd.md                              # Core CLI commands for running ingestion, transformation, and dbt
+c:\Project\RetailCortex\
+├── README.md                           # Project description with architecture + CI badges
 ├── config/
-│   ├── kafka.yaml                      # Kafka topics and bootstrap servers configuration
-│   └── snowflake.yaml                  # Snowflake warehouse, database, schema, and role attributes
-├── Data/
-│   ├── bronze/customers/               # Raw ingested customer data in local Parquet format
-│   └── checkpoints/                    # Spark streaming checkpoints (customers, silver_customers)
+│   ├── kafka.yaml                      # Kafka bootstrap servers and 30 topic mappings
+│   └── snowflake.yaml                  # Snowflake warehouse, database, schema, role
+├── data/
+│   ├── bronze/{entity}/                # Raw Parquet per entity (date-partitioned)
+│   ├── checkpoints/{entity}/           # Spark streaming checkpoints
+│   └── dead_letter/{bronze|silver}/{entity}/  # Parse/transform failures
 ├── src/
-│   ├── common/
-│   │   ├── config.py                   # Dynamic .env loading and YAML configuration loaders
-│   │   ├── paths.py                    # Centralized path generation using pathlib.Path
-│   │   ├── reader.py                   # PySpark Kafka stream and Parquet reader utilities
-│   │   ├── spark.py                    # PySpark session builder with bundled connectors (Kafka, Snowflake)
-│   │   └── writer.py                   # PySpark Parquet streaming and Snowflake batch writer utilities
-│   ├── ingestion/
-│   │   └── customer_kafka_stream.py    # Bronze streaming pipeline from Kafka to local Parquet
-│   ├── schemas/
-│   │   └── customer.py                 # Spark schema definitions (CUSTOMER_SCHEMA, CUSTOMER_BRONZE_SCHEMA)
-│   └── transformation/
-│       └── customer.py                 # Silver streaming pipeline from Bronze to Snowflake using foreachBatch
-└── dbt_retail/                         # dbt Project for Gold Layer modelling
-    ├── dbt_project.yml                 # dbt project configurations (schema structures, materializations)
-    ├── packages.yml                    # dbt external package dependencies (e.g., dbt_date)
-    ├── macros/
-    │   └── generate_schema_name.sql    # Custom schema name resolution macro
-    └── models/
-        ├── silver/
-        │   └── sources.yml             # External Silver layer source registration
-        └── gold/
-            ├── dim_customers.sql       # Incremental Customer Dimension table with merge strategy
-            └── dim_dates.sql           # Static Date Dimension table using dbt_date package
+│   ├── bronze/                         # 30 entity runners + generic runner.py
+│   │   ├── runner.py                   # Generic streaming Bronze runner
+│   │   ├── customer.py                 # Per-entity entry point
+│   │   └── ...                         # 28 more entities
+│   ├── silver/                         # 30 entity runners + generic runner.py
+│   │   ├── runner.py                   # Generic Silver batch runner
+│   │   ├── customer.py                 # Per-entity transform + runner call
+│   │   └── ...                         # 28 more entities
+│   ├── schemas/                        # 30 entity schemas (StructType)
+│   │   ├── customer_schema.py          # Source + Bronze schema definitions
+│   │   └── ...                         # 29 more schema files
+│   └── common/                         # Reusable infrastructure
+│       ├── config.py                   # YAML + .env configuration loaders
+│       ├── dlq.py                      # Bronze + Silver dead letter queue writers
+│       ├── logger.py                   # Structured logging
+│       ├── paths.py                    # Path generation (bronze, checkpoint)
+│       ├── reader.py                   # Kafka stream + Parquet readers
+│       ├── settings.py                 # Settings singleton
+│       ├── spark.py                    # Spark session builder (Kafka + Snowflake jars)
+│       └── writer.py                   # Parquet stream + Snowflake batch writer
+├── dbt_retail/                         # dbt project for Gold layer
+│   ├── dbt_project.yml                 # Silver (view) + Gold (table) materialization
+│   ├── models/
+│   │   ├── silver/sources.yml          # 30 source tables with freshness checks
+│   │   └── gold/                       # 24 SQL models + 23 YAML configs
+│   ├── macros/
+│   │   ├── generate_schema_name.sql    # Custom schema resolution
+│   │   └── incremental_filter.sql      # Reusable incremental WHERE clause
+│   └── packages.yml                    # dbt_date, dbt_utils
+├── dagster/
+│   └── definitions.py                  # dbt assets + daily 6 AM schedule
+├── tests/                              # 152 pytest unit tests
+│   ├── conftest.py
+│   ├── test_config.py
+│   ├── test_paths.py
+│   ├── test_schemas.py
+│   └── test_settings.py
+├── run_pipeline.py                     # Orchestrator: bronze → silver → dbt
+├── Makefile                            # Pipeline, lint, test, security targets
+└── .github/workflows/ci.yml           # CI: ruff → pytest → dbt run → dbt test → docs deploy
 ```
 
 ---
@@ -63,50 +83,55 @@ c:\Project\RetailContex\
 
 ### A. Configurations
 *   **Kafka (`config/kafka.yaml`):**
-    *   `bootstrap_servers`: `localhost:9092` (hardcoded)
-    *   `topics.customers`: `telemetry.ecommerce.customers`
+    *   `bootstrap_servers`: `localhost:9092` (hardcoded — needs SSL/SASL for production)
+    *   `topics`: 30 topic mappings in `telemetry.ecommerce.*` namespace
 *   **Snowflake (`config/snowflake.yaml`):**
     *   `warehouse`: `COMPUTE_WH`
     *   `database`: `RETAIL_DB`
     *   `schema`: `SILVER`
-    *   `role`: `ACCOUNTADMIN` (critical security vulnerability)
+    *   `role`: `RETAIL_ETL_ROLE` (least-privilege naming)
 *   **Environment Variables (`.env`):**
-    *   Used in `config.py` to retrieve sensitive credentials: `SNOWFLAKE_URL`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`.
+    *   Required: `SNOWFLAKE_URL`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD`
 
-### B. PySpark Schemas (`src/schemas/customer.py`)
-Currently contains two schemas. A major issue is that both store datetime and boolean values as **strings**:
-1.  **`CUSTOMER_SCHEMA`**: Contains fields: `created_at` (String), `customer_id` (String), `customer_status` (String), `email` (String), `first_name` (String), `is_deleted` (String), `last_name` (String), `phone` (String), `registered_at` (String), `updated_at` (String), and `created_time` (Timestamp).
-2.  **`CUSTOMER_BRONZE_SCHEMA`**: Inherits string data types for `created_at`, `registered_at`, `updated_at`, `is_deleted`, and `created_time`. Includes metadata fields: `ingest_time` (Timestamp) and `ingest_date` (Date).
+### B. PySpark Schemas (`src/schemas/`)
+Each entity defines two schemas:
+1. **`{ENTITY}_SCHEMA`** — matches the Kafka JSON payload (all fields as StringType to handle raw CDC)
+2. **`{ENTITY}_BRONZE_SCHEMA`** — extends source schema with Kafka metadata: `kafka_key`, `topic`, `partition`, `offset`, `ingestion_timestamp`, `ingestion_date`
+
+String-typed datetime and boolean fields are cast to proper types in the Silver transform.
 
 ### C. Pipeline Implementation Summary
-1.  **Bronze Ingestion (`customer_kafka_stream.py`):**
-    *   Builds Spark session with Kafka, Snowflake, and JDBC connectors.
-    *   Reads from Kafka `telemetry.ecommerce.customers` topic.
-    *   Parses JSON `value` using `CUSTOMER_SCHEMA` (converting it to string first).
-    *   Adds `ingest_time` (current timestamp) and `ingest_date` (date from ingest time).
-    *   Streams to local Parquet files partitioned by `ingest_date` with checkpoints at `Data/checkpoints/customers`.
-2.  **Silver Transformation (`src/transformation/customer.py`):**
-    *   Reads Bronze Parquet files as a stream using `CUSTOMER_BRONZE_SCHEMA`.
-    *   Converts date/timestamp string columns to actual `TimestampType` using `to_timestamp`.
-    *   Normalizes data: `email` to lowercase, `customer_status` to uppercase, casts `is_deleted` to boolean.
-    *   Enriches record with a concatenated `full_name` column.
-    *   Selects final column subset: `customer_id`, `full_name`, `email`, `phone`, `customer_status`, `registered_at`, `ingest_time`, `is_deleted`, `created_at`, `updated_at`.
-    *   Saves micro-batches incrementally to Snowflake table `customers` using `foreachBatch` pointing to `write_snowflake_batch` in "append" mode (results in data duplication).
+1.  **Bronze Ingestion (`src/bronze/runner.py`):**
+    *   Spark session with Kafka/Snowflake connectors
+    *   Reads Kafka stream from entity-specific topic
+    *   Parses JSON `value` using `{ENTITY}_SCHEMA`
+    *   Per micro-batch: splits into good (Parquet) and bad (DLQ), partitioned by `ingestion_date`
+    *   Checkpointed for exactly-once semantics
+2.  **Silver Transformation (`src/silver/runner.py`):**
+    *   Reads Bronze Parquet stream with `{ENTITY}_BRONZE_SCHEMA`
+    *   Applies per-entity `transform_func` (type casting, normalization, enrichment)
+    *   Writes to Snowflake via merge upsert (`mergeKey`)
+    *   `trigger(availableNow=True)` — processes all available data then stops
+    *   Failed batches routed to Silver DLQ
 
 ### D. dbt Layer Context (`dbt_retail/`)
-*   **`dbt_project.yml`**: Structure separates Silver and Gold targets.
-    *   Silver models default to `view` materialization under schema `silver`.
-    *   Gold models default to `table` materialization under schema `gold`.
-*   **`models/silver/sources.yml`**: Registers Snowflake `RETAIL_DB.SILVER.customers` table as source. Lacks freshness or quality assertions.
-*   **`models/gold/dim_customers.sql`**: Incremental materialization with `unique_key='customer_id'` and `merge` strategy. Scans incrementally where `ingest_time` is greater than the max target `silver_ingest_time`. No SCD Type 2 history preservation is implemented (pure Type 1 overwrite).
-*   **`models/gold/dim_dates.sql`**: Table materialization calling `dbt_date.get_date_dimension("2020-01-01", "2030-12-31")` and casting the `date_day` column to an integer `date_key` (YYYYMMDD).
+*   **`dbt_project.yml`**: Silver → view (schema: `silver`), Gold → table (schema: `gold`)
+*   **`models/silver/sources.yml`**: 30 source tables with freshness checks (warn: 2h, error: 6h) on `ingestion_timestamp`
+*   **Gold models (24 total):**
+    *   9 dimensions — incremental merge with surrogate keys
+    *   8 facts — incremental merge with surrogate keys referencing dimensions
+    *   7 analytics — full refresh table (customer_360, product_performance, etc.)
+*   **264 dbt tests** run in CI covering `not_null`, `unique`, `accepted_values`
+*   **Missing:** `relationships` tests for foreign keys, `dim_dates.yml` (added in v0.3.0)
 
 ---
 
-## 4. Key Security & Design Vulns (To Be Remedied)
-1.  **Snowflake `ACCOUNTADMIN` Over-Privileging:** Applications load the root admin role. Must be refactored to use a custom, least-privileged role.
-2.  **No Kafka Security:** Unsecured connection details are defined in YAML config and reader utilities.
-3.  **Local Storage Reliance:** All Spark paths are bound to local directories via `PROJECT_ROOT = Path.cwd()`, failing to support production cloud object storage (S3/ADLS).
-4.  **No True Upsert (Data Duplication):** The Silver writer runs `mode("append")` inside `foreachBatch`, resulting in duplicated customer records in Snowflake instead of performing a dynamic `MERGE`.
-5.  **Missing SCD Type 2:** Customer Dimension in dbt overwritten incrementally without preserving history.
-6.  **Missing Alerting, DLQ, and Quality Testing:** No Dead Letter Queue for malformed Kafka events, no monitoring, and no dbt validation/freshness checks.
+## 4. Known Vulnerabilities (To Be Remedied)
+1.  **No Secrets Management:** Snowflake credentials stored in plaintext `.env` file. No vault integration.
+2.  **No Kafka Security:** Unsecured connection — no SSL/SASL configured.
+3.  **Local Storage Reliance:** All Spark paths bound to local directories via `PROJECT_ROOT = Path.cwd()`, no cloud storage support.
+4.  **No SCD Type 2:** Gold dimensions overwrite incrementally (Type 1) without preserving history.
+5.  **Silver DLQ Batch Failure:** A single bad record sends the entire micro-batch to DLQ — no per-record error handling.
+6.  **No Data Retention:** Bronze Parquet + DLQ files grow unboundedly — no TTL or purge policy.
+7.  **Incomplete dbt Test Coverage:** ~70% of gold columns tested, zero `relationships` tests on foreign keys.
+8.  **Stale docs/architecture.md:** Previously referenced `ACCOUNTADMIN` role (fixed in config, doc now updated).
