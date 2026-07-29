@@ -16,7 +16,7 @@ def create_spark_session(app_name: str) -> SparkSession:
                 "net.snowflake:snowflake-jdbc:3.24.2"
             ])
         )
-        .config("spark.sql.streaming.schemaInference", "true")
+        .config("spark.sql.streaming.schemaInference", "false")
         .config("spark.sql.session.timeZone", "UTC")
         .config("spark.driver.host", "127.0.0.1")
         .getOrCreate()
