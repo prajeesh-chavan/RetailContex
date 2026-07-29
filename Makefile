@@ -45,11 +45,22 @@ dagster-dev:
 dagster-run-all:
 	..\env\Scripts\dagster asset materialize --select "*" -f dagster\definitions.py
 
-setup:
-	pip install -r requirements.txt
+test:
+	pytest tests/ -v
 
 lint:
 	ruff check src/
+
+format:
+	ruff format src/ --check
+
+security:
+	bandit -r src/ -x src/**/test_*
+
+ci: lint test
+
+setup:
+	pip install -r requirements.txt
 
 clean:
 	rm -rf src/**/__pycache__ .pytest_cache
