@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: dim_dates
+    description: "Date dimension — one row per calendar day from 2020-01-01 to 2030-12-31, built as a full refresh table using dbt_date"
+    columns:
+      - name: date_key
+        description: "Integer surrogate key in YYYYMMDD format"
+        tests: [unique, not_null]
+      - name: date_day
+        description: "Calendar date"
+        tests: [not_null]
+      - name: year
+        description: "Year number (e.g., 2024)"
+        tests: [not_null]
+      - name: month
+        description: "Month number (1-12)"
+        tests: [not_null]
+      - name: day
+        description: "Day of month (1-31)"
+        tests: [not_null]
+      - name: quarter
+        description: "Quarter number (1-4)"
+        tests: [not_null]
+      - name: day_of_week
+        description: "Day of week number (0=Sunday, 6=Saturday)"
+        tests: [not_null]
+      - name: month_name
+        description: "Full month name (January, February, ...)"
+        tests: [not_null]
+      - name: day_name
+        description: "Full day name (Sunday, Monday, ...)"
+        tests: [not_null]
