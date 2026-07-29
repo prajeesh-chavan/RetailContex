@@ -1,6 +1,33 @@
 bootstrap_servers: localhost:9092
 
 topics:
-  customers: telemetry.ecommerce.customers
-  order: orders
-  product: products
+  address: telemetry.ecommerce.addresses
+  brand: telemetry.ecommerce.brands
+  carrier: telemetry.ecommerce.carriers
+  cart: telemetry.ecommerce.carts
+  cart_item: telemetry.ecommerce.cart_items
+  category: telemetry.ecommerce.categories
+  customer: telemetry.ecommerce.customers
+  customer_address: telemetry.ecommerce.customer_addresses
+  customer_event: telemetry.ecommerce.customer_events
+  inventory: telemetry.ecommerce.inventory
+  inventory_movement: telemetry.ecommerce.inventory_movements
+  order: telemetry.ecommerce.orders
+  order_address: telemetry.ecommerce.order_addresses
+  order_item: telemetry.ecommerce.order_items
+  order_item_discount: telemetry.ecommerce.order_item_discounts
+  order_status_history: telemetry.ecommerce.order_status_history
+  payment: telemetry.ecommerce.payments
+  product: telemetry.ecommerce.products
+  product_review: telemetry.ecommerce.product_reviews
+  product_variant: telemetry.ecommerce.product_variants
+  promotion: telemetry.ecommerce.promotions
+  refund: telemetry.ecommerce.refunds
+  return_item: telemetry.ecommerce.return_items
+  returns: telemetry.ecommerce.returns
+  sales_channel: telemetry.ecommerce.sales_channels
+  shipment: telemetry.ecommerce.shipments
+  shipment_item: telemetry.ecommerce.shipment_items
+  vendor: telemetry.ecommerce.vendors
+  vendor_address: telemetry.ecommerce.vendor_addresses
+  warehouse: telemetry.ecommerce.warehouses
